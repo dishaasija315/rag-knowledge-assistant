@@ -1,192 +1,134 @@
 # RAG Knowledge Assistant
 
-A production-ready Retrieval-Augmented Generation (RAG) system for document Q&A, multi-document comparison, contradiction detection, and targeted summarization — built with FastAPI, Streamlit, LangChain, LangGraph, Qdrant, Sentence Transformers, and Google Gemini.
-
-![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.110-009688?logo=fastapi)
-![LangChain](https://img.shields.io/badge/LangChain-Text%20Splitting-green)
-![LangGraph](https://img.shields.io/badge/LangGraph-Orchestration-orange)
-![Qdrant](https://img.shields.io/badge/Qdrant-Vector%20DB-red)
-![Gemini](https://img.shields.io/badge/Gemini-1.5%20Flash-blue?logo=google)
+RAG Knowledge Assistant is a Retrieval-Augmented Generation system designed for document question-answering, multi-document comparison, contradiction detection, and targeted summarization over PDF documents. It addresses the common challenges of ungrounded answers and opaque sourcing by coupling structured vector retrieval with deterministic provenance tracking and a verification workflow. The system is built with FastAPI, LangGraph, Qdrant, Sentence Transformers, Google Gemini, and Streamlit.
 
 ---
 
-## Table of Contents
+## Features
 
-- [Overview](#overview)
-- [Key Features](#key-features)
-- [Architecture](#architecture)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Setup & Installation](#setup--installation)
-- [Running the Application](#running-the-application)
-- [API Reference](#api-reference)
-- [How It Works (Technical Deep-Dive)](#how-it-works-technical-deep-dive)
-- [Testing](#testing)
-- [Design Decisions](#design-decisions)
-- [Interview Q&A](#interview-qa)
-
----
-
-## Overview
-
-Users upload PDF documents and ask questions about them. The system:
-
-1. **Ingests** PDFs using PyMuPDF, preserving page-level metadata.
-2. **Chunks** text using LangChain's `RecursiveCharacterTextSplitter` with full provenance tracking.
-3. **Embeds** chunks locally using Sentence Transformers (`all-MiniLM-L6-v2`, 384 dimensions).
-4. **Stores** embeddings and metadata in a persistent Qdrant vector database.
-5. **Retrieves** the most relevant chunks via cosine similarity search.
-6. **Generates** strictly grounded answers using Google Gemini with real source citations.
-7. **Orchestrates** the entire RAG workflow using LangGraph state machines.
-
-The system is **strictly grounded** — if the uploaded documents don't contain the answer, the system explicitly says:
-
-> *"I couldn't find this information in the uploaded documents."*
-
-No hallucination. No fabricated citations. Every claim is traceable to an exact filename and page number.
-
----
-
-## Key Features
-
-| Feature | Description |
-|---|---|
-| **Document Q&A** | Ask questions and get answers grounded strictly in uploaded PDFs with exact source citations |
-| **Multi-Document Search** | Search across all uploaded documents or filter by specific documents |
-| **Document Comparison** | Compare two documents on a topic — identify additions, modifications, and removals |
-| **Contradiction Detection** | Detect genuine factual conflicts across documents (ignoring version/date differences) |
-| **Targeted Summarization** | Retrieve and summarize only sections relevant to a specific topic |
-| **Strict Grounding** | LLM answers only from retrieved context; refuses ungrounded queries explicitly |
-| **Real Citations** | Every answer includes verified filename + page number citations from actual chunks |
-| **LangGraph Orchestration** | Multi-step RAG pipeline: Query Analysis → Retrieval → Generation → Grounding Validation |
-| **Persistent Vector Store** | Qdrant Docker volume ensures vectors survive container restarts |
-| **Evaluation Framework** | Automated benchmark measuring retrieval recall, grounding, citation accuracy, and refusal rate |
+- **Grounded Document Q&A**: Answers user questions strictly using retrieved PDF context; if relevant information is absent, the system returns an explicit refusal rather than speculating.
+- **Page-Level Provenance & Citations**: Every generated answer includes source citations specifying the exact PDF filename, 1-indexed page number, chunk ID, and similarity score.
+- **Cross-Document Comparison**: Performs targeted semantic comparison across two documents on a specified topic, outlining policy differences, additions, and modifications.
+- **Contradiction Detection**: Analyzes retrieved passages across documents to identify conflicting claims, attributing opposing statements to their respective sources and pages.
+- **Targeted Topic Summarization**: Focuses summarization on user-specified topics across single or multiple documents, avoiding broad, unfocused summaries.
+- **Persistent Vector Storage & Scoped Filtering**: Uses Qdrant vector storage with disk persistence, supporting cosine similarity search and payload filtering by single or multiple document IDs.
+- **Automated Evaluation Benchmark**: Includes an evaluation harness that tests retrieval recall@k, grounding accuracy, citation accuracy, and refusal behavior against a ground-truth dataset.
 
 ---
 
 ## Architecture
 
-```
-                                 [ User / Streamlit UI ]
-                                            |
-                                            v (HTTP)
-                                     [ FastAPI Backend ]
-                                            |
-                  +-------------------------+-------------------------+
-                  | (Upload Flow)                                     | (Query / Compare / Contradict / Summarize)
-                  v                                                   v
-         [ Save PDF to Local ]                                [ Query Embedding ]
-        (data/documents/*.pdf)                              (all-MiniLM-L6-v2, 384-dim)
-                  |                                                   |
-                  v                                                   v
-          [ PyMuPDF Parsing ]                                [ Qdrant Vector Search ]
-        (Text + Page metadata)                               (Cosine Distance Top-K)
-                  |                                                   |
-                  v                                                   v
-        [ Chunking (LangChain) ]                             [ Retrieved Chunks ]
-     (doc_id, chunk_id, page, file)                       (Exact payload & metadata)
-                  |                                                   |
-                  v                                                   v
-      [ Embeddings (MiniLM-L6) ]                            [ LangGraph Workflow ]
-                  |                                         Query Analysis → Retrieve
-                  v                                         → Generate → Validate
-         [ Store in Qdrant ]                                          |
-      (Docker Volume Persistent)                                      v
-                                                            [ Grounded Answer + Citations ]
+```mermaid
+flowchart LR
+    User([User / Browser])
+    UI[Streamlit Dashboard<br/>:8501]
+    API[FastAPI Backend<br/>:8000]
+    
+    subgraph Pipeline [LangGraph RAG Workflow]
+        direction TB
+        N1[Query Analysis Node]
+        N2[Retrieval Node]
+        N3[Generation Node]
+        N4[Grounding Validation Node]
+        N1 --> N2 --> N3 --> N4
+    end
+    
+    Embed[Sentence Transformers<br/>all-MiniLM-L6-v2]
+    Qdrant[(Qdrant Vector DB<br/>:6333)]
+    Gemini[Google Gemini 1.5 Flash]
+
+    User --> UI
+    UI --> API
+    API --> N1
+    N2 <-->|Dense Vectors| Embed
+    N2 <-->|Cosine Top-K| Qdrant
+    N3 <-->|Context + Prompt| Gemini
+    N4 <-->|Verify Support| Gemini
+    N4 --> API
+    API --> UI
 ```
 
-### LangGraph Workflow (4-Node State Machine)
+The system uses a decoupled architecture:
+1. **Frontend**: A Streamlit application (`frontend/streamlit_app.py`) provides an interactive interface for document uploads, Q&A, comparison, contradiction detection, summarization, and benchmark inspection.
+2. **Backend**: A FastAPI application (`app/main.py`) exposes typed REST endpoints and coordinates data ingestion, storage, and retrieval services.
+3. **Workflow Engine**: A compiled LangGraph `StateGraph` (`app/workflows/rag_graph.py`) orchestrates execution across four explicit state nodes: query analysis, vector retrieval, answer generation, and grounding validation.
+4. **Vector Store**: Qdrant runs as a containerized service with local disk storage, indexing 384-dimensional dense vectors alongside rich payload metadata.
 
-```
-┌──────────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────────────┐
-│  Analyze Query   │───>│   Retrieve   │───>│   Generate   │───>│  Validate Grounding  │───> END
-│ (Optimize search │    │ (Qdrant top-k│    │ (Gemini with │    │ (Check answer against │
-│  keywords)       │    │  cosine sim) │    │  context)    │    │  context, attach      │
-└──────────────────┘    └──────────────┘    └──────────────┘    │  real citations)      │
-                                                                └──────────────────────┘
-```
+---
+
+## How It Works
+
+1. **Document Ingestion & PDF Parsing**: When a PDF is uploaded, PyMuPDF (`fitz`) parses the file page-by-page. The system extracts raw text while preserving 1-indexed page numbers and computes a deterministic SHA-256 hash of the file bytes as the document ID (`doc_id`).
+2. **Chunking with Provenance**: Text from each page is split using LangChain's `RecursiveCharacterTextSplitter` (chunk size: 500 characters, chunk overlap: 50 characters). Each chunk receives a deterministic identifier (`{doc_id}_p{page}_c{chunk_index}`) and metadata storing its filename, page number, and offset.
+3. **Embedding Generation**: Chunks are encoded locally into 384-dimensional dense vectors using the `sentence-transformers/all-MiniLM-L6-v2` model. Local inference eliminates embedding API costs and external rate limits.
+4. **Vector Indexing**: Chunks and their embeddings are stored in Qdrant with deterministic UUIDv5 identifiers. Metadata payloads (document ID, filename, page number, text) are attached to each point, enabling filtered search.
+5. **Query Analysis & Retrieval**: A user query enters the LangGraph workflow. An analysis node optimizes the query into focused search keywords. The retrieval node embeds the query and executes cosine similarity search in Qdrant, applying optional document ID filters (`doc_id` or `doc_ids`).
+6. **Grounded Generation & Validation**: Gemini 1.5 Flash generates an answer constrained strictly to retrieved chunks. A validation node checks the response against the context. If the query cannot be answered from the retrieved passages, the system returns a standard refusal message (`"I couldn't find this information in the uploaded documents."`). Otherwise, citations are extracted directly from chunk metadata.
 
 ---
 
 ## Tech Stack
 
-| Component | Technology | Purpose |
-|---|---|---|
-| **Backend API** | FastAPI | REST endpoints for upload, query, compare, summarize |
-| **Frontend** | Streamlit | Interactive chat UI with tabs for each feature |
-| **PDF Parsing** | PyMuPDF (fitz) | Fast, accurate text extraction with page-level metadata |
-| **Chunking** | LangChain `RecursiveCharacterTextSplitter` | Semantic text splitting with provenance metadata |
-| **Embeddings** | Sentence Transformers (`all-MiniLM-L6-v2`) | Local 384-dim dense vectors, no API cost |
-| **Vector Database** | Qdrant (Docker) | Cosine similarity search with payload filtering |
-| **LLM** | Google Gemini 1.5 Flash (free tier) | Grounded text generation with strict system prompts |
-| **Workflow** | LangGraph | Stateful multi-step RAG orchestration |
-| **Data Validation** | Pydantic v2 | Request/response schemas and settings management |
-| **Testing** | Pytest | 39 unit and integration tests |
-
-**Cost: 100% free/local** (local embeddings, local Qdrant, Gemini free tier).
+| Technology | Purpose |
+|---|---|
+| **Python 3.11** | Core application runtime |
+| **FastAPI** | Asynchronous REST API framework and route handling |
+| **Streamlit** | Interactive web dashboard and UI client |
+| **LangGraph** | Multi-node state machine workflow orchestration |
+| **LangChain Text Splitters** | Recursive character text chunking with metadata preservation |
+| **Qdrant** | Vector database for cosine similarity search and payload filtering |
+| **Sentence Transformers** | Local dense vector embeddings (`all-MiniLM-L6-v2`, 384 dimensions) |
+| **Google Gemini** | LLM for answer generation, query analysis, and grounding validation (`gemini-1.5-flash`) |
+| **PyMuPDF (`fitz`)** | PDF text extraction and page metadata extraction |
+| **Pydantic v2** | Data validation, request/response models, and environment settings |
+| **Docker & Docker Compose** | Containerized deployment of the Qdrant service |
+| **Pytest** | Automated unit and integration testing suite |
 
 ---
 
 ## Project Structure
 
 ```
-rag-knowledge-assistant/
-│
+rag_project/
 ├── app/
-│   ├── __init__.py
-│   ├── main.py                     # FastAPI application entrypoint
-│   ├── config.py                   # Pydantic settings from .env
 │   ├── api/
-│   │   └── routes.py               # REST API endpoints (upload, query, compare, etc.)
-│   ├── core/
-│   │   ├── vector_store.py         # Qdrant client, collection CRUD, indexing pipeline
-│   │   └── embeddings.py           # SentenceTransformer wrapper (all-MiniLM-L6-v2)
-│   ├── ingestion/
-│   │   ├── pdf_loader.py           # PyMuPDF text extraction with SHA256 doc hashing
-│   │   └── chunker.py              # LangChain text splitter with metadata preservation
-│   ├── retrieval/
-│   │   └── retriever.py            # Cosine similarity retrieval with doc_id filtering
-│   ├── llm/
-│   │   ├── gemini_client.py        # Gemini API client with offline fallback
-│   │   └── prompts.py              # Strictly grounded system prompts
-│   ├── workflows/
-│   │   └── rag_graph.py            # LangGraph 4-node workflow (analyze→retrieve→generate→validate)
+│   │   └── routes.py             # FastAPI REST endpoints
 │   ├── comparison/
-│   │   └── comparator.py           # Document comparison, contradiction, and summarization
+│   │   └── comparator.py         # Cross-document comparison & contradiction logic
+│   ├── core/
+│   │   ├── embeddings.py         # Sentence Transformers embedding service
+│   │   └── vector_store.py       # Qdrant client connection & collection management
 │   ├── evaluation/
-│   │   └── evaluator.py            # Automated RAG benchmark framework
-│   └── models/
-│       └── schemas.py              # Pydantic models for all request/response payloads
-│
+│   │   └── evaluator.py          # Benchmark runner (recall, grounding, citations)
+│   ├── ingestion/
+│   │   ├── chunker.py            # LangChain text splitter with chunk provenance
+│   │   └── pdf_loader.py         # PyMuPDF PDF parser and document hashing
+│   ├── llm/
+│   │   ├── gemini_client.py      # Google Gemini client integration
+│   │   └── prompts.py            # System prompts and refusal templates
+│   ├── models/
+│   │   └── schemas.py            # Pydantic request, response, and entity schemas
+│   ├── retrieval/
+│   │   └── retriever.py          # Qdrant similarity search with filter support
+│   ├── workflows/
+│   │   └── rag_graph.py          # LangGraph 4-node state machine workflow
+│   ├── config.py                 # Application settings and environment parsing
+│   └── main.py                   # FastAPI app initialization and lifespan events
 ├── frontend/
-│   ├── app.py                      # Streamlit UI (5 tabs: Q&A, Compare, Contradict, Summarize, Eval)
-│   └── api_client.py               # HTTP client for FastAPI backend
-│
+│   ├── api_client.py             # Python HTTP client for FastAPI communication
+│   └── streamlit_app.py          # Streamlit UI (Q&A, Compare, Contradictions, Eval)
 ├── data/
-│   ├── documents/                  # Uploaded PDF storage
-│   ├── qdrant_storage/             # Persistent Qdrant volume
-│   └── evaluation_dataset.json     # Benchmark test cases
-│
-├── tests/                          # 39 passing tests
-│   ├── test_ingestion.py           # PDF loading and validation
-│   ├── test_chunking.py            # Text splitting and metadata
-│   ├── test_embeddings.py          # Embedding dimensions and semantics
-│   ├── test_vector_store.py        # Qdrant CRUD and persistence
-│   ├── test_retrieval.py           # Semantic search and filtering
-│   ├── test_rag_workflow.py        # LangGraph workflow and grounding
-│   ├── test_comparison.py          # Compare, contradict, summarize
-│   ├── test_evaluation.py          # Evaluation framework
-│   └── test_api.py                 # FastAPI endpoint tests
-│
+│   ├── documents/                # Ingested PDF document storage
+│   ├── qdrant_storage/           # Qdrant local persistence directory
+│   └── evaluation_dataset.json   # Benchmark test cases with ground-truth facts
 ├── scripts/
-│   ├── sample_docs_generator.py    # Generate test PDFs with known differences
-│   └── check_health.py             # System health verification
-│
-├── .env.example                    # Template environment variables
-├── .gitignore
-├── requirements.txt
-├── docker-compose.yml              # Qdrant with persistent volume
+│   ├── check_health.py           # Quick sanity check for service connectivity
+│   ├── sample_docs_generator.py  # Generates test PDFs with overlapping/conflicting policies
+│   └── verify_rag.py             # End-to-end command-line verification script
+├── tests/                        # 39 automated unit and integration tests
+├── docker-compose.yml            # Docker Compose configuration for Qdrant
+├── requirements.txt              # Project dependencies
+├── .env.example                  # Environment variable template
 └── README.md
 ```
 
@@ -194,346 +136,162 @@ rag-knowledge-assistant/
 
 ## Setup & Installation
 
-### Prerequisites
+### 1. Prerequisites
 
 - Python 3.11+
-- Docker Desktop (for Qdrant)
-- Google Gemini API key ([free tier](https://aistudio.google.com/apikey))
+- Docker and Docker Compose
+- Google Gemini API Key ([Google AI Studio](https://aistudio.google.com/))
 
-### 1. Clone the Repository
+### 2. Clone Repository & Setup Environment
 
 ```bash
-git clone https://github.com/yourusername/rag-knowledge-assistant.git
+git clone https://github.com/dishaasija315/rag-knowledge-assistant.git
 cd rag-knowledge-assistant
-```
 
-### 2. Create Virtual Environment
-
-```bash
+# Create and activate virtual environment
 python -m venv venv
 
-# Windows
+# Windows:
 venv\Scripts\activate
 
-# Linux/Mac
+# Linux / macOS:
 source venv/bin/activate
-```
 
-### 3. Install Dependencies
-
-```bash
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 4. Configure Environment Variables
+### 3. Configure Environment Variables
+
+Copy `.env.example` to `.env` and set your Gemini API key:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and add your Gemini API key:
+Configure `.env` parameters:
 
 ```env
-GEMINI_API_KEY=your_actual_gemini_api_key
+GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL_NAME=gemini-1.5-flash
-
 QDRANT_HOST=localhost
 QDRANT_PORT=6333
 QDRANT_COLLECTION_NAME=rag_documents
-
 EMBEDDING_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
 EMBEDDING_DIMENSION=384
-
 CHUNK_SIZE=500
 CHUNK_OVERLAP=50
-DEFAULT_TOP_K=4
+DOCUMENTS_STORAGE_PATH=./data/documents
+API_HOST=0.0.0.0
+API_PORT=8000
 ```
 
-### 5. Start Qdrant Vector Database
+### 4. Start Qdrant Vector Database
 
 ```bash
 docker compose up -d
 ```
 
-Verify Qdrant is running:
+Verify that the Qdrant service is running at `http://localhost:6333`.
+
+### 5. Start the FastAPI Backend
 
 ```bash
-curl http://localhost:6333/readyz
-# Expected: "OK"
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 6. Generate Sample Test PDFs (Optional)
+The interactive API documentation is accessible at `http://localhost:8000/docs`.
+
+### 6. Start the Streamlit Frontend
+
+In a separate terminal (with virtual environment activated):
 
 ```bash
-python scripts/sample_docs_generator.py
+python -m streamlit run frontend/streamlit_app.py --server.port 8501
 ```
 
-This creates two realistic HR policy documents (`policy_2025.pdf` and `policy_2026.pdf`) with known differences for testing comparison and contradiction detection.
+The dashboard will open at `http://localhost:8501`.
 
 ---
 
-## Running the Application
+## Environment Variables
 
-### Start the FastAPI Backend
-
-```bash
-uvicorn app.main:app --reload --port 8000
-```
-
-- API Docs: http://localhost:8000/docs
-- Health Check: http://localhost:8000/health
-
-### Start the Streamlit Frontend
-
-```bash
-streamlit run frontend/app.py
-```
-
-- Streamlit UI: http://localhost:8501
+| Variable | Default Value | Description |
+|---|---|---|
+| `GEMINI_API_KEY` | *(Required)* | API key for Google Gemini model access |
+| `GEMINI_MODEL_NAME` | `gemini-1.5-flash` | Gemini model variant for generation and validation |
+| `QDRANT_HOST` | `localhost` | Hostname of the Qdrant vector database |
+| `QDRANT_PORT` | `6333` | REST API port for Qdrant |
+| `QDRANT_COLLECTION_NAME` | `rag_documents` | Target Qdrant collection name |
+| `EMBEDDING_MODEL_NAME` | `sentence-transformers/all-MiniLM-L6-v2` | Hugging Face model identifier for embeddings |
+| `EMBEDDING_DIMENSION` | `384` | Embedding vector dimension for collection configuration |
+| `CHUNK_SIZE` | `500` | Target character size for chunking |
+| `CHUNK_OVERLAP` | `50` | Character overlap between consecutive chunks |
+| `DOCUMENTS_STORAGE_PATH` | `./data/documents` | Filesystem path for ingested PDF copies |
+| `API_HOST` | `0.0.0.0` | Host interface for FastAPI server |
+| `API_PORT` | `8000` | Port for FastAPI server |
 
 ---
 
-## API Reference
+## API Endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/documents/upload` | Upload and index a PDF document |
-| `GET` | `/documents` | List all indexed documents |
-| `DELETE` | `/documents/{doc_id}` | Delete a document by ID |
-| `POST` | `/query` | Grounded Q&A with source citations |
-| `POST` | `/compare` | Compare two documents on a topic |
-| `POST` | `/contradictions` | Detect factual contradictions across documents |
-| `POST` | `/summarize` | Targeted summarization of a topic |
-| `GET` | `/evaluation` | Run automated benchmark evaluation |
-| `GET` | `/health` | System health status |
-
-### Example: Document Q&A
-
-```bash
-curl -X POST http://localhost:8000/query \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "How many days of annual leave do employees receive?",
-    "top_k": 4
-  }'
-```
-
-**Response:**
-
-```json
-{
-  "query": "How many days of annual leave do employees receive?",
-  "answer": "According to the 2026 policy, employees receive 24 days of paid annual leave per calendar year. [Source: policy_2026.pdf, Page 2]",
-  "citations": [
-    {
-      "filename": "policy_2026.pdf",
-      "page_number": 2,
-      "chunk_id": "abc123_p2_c0",
-      "snippet": "Employees receive 24 days of paid annual leave during each calendar year...",
-      "score": 0.87
-    }
-  ],
-  "is_grounded": true,
-  "retrieved_count": 4
-}
-```
-
----
-
-## How It Works (Technical Deep-Dive)
-
-### 1. Document Ingestion (`app/ingestion/pdf_loader.py`)
-
-- **PyMuPDF** (`fitz`) extracts text page-by-page from uploaded PDFs.
-- A **deterministic SHA256 hash** of the file content generates a stable `doc_id` — uploading the same file twice produces the same ID, preventing duplicates.
-- Empty pages are filtered. Corrupted or non-PDF files raise typed exceptions (`InvalidPDFError`, `EmptyPDFError`).
-- The raw PDF is saved to `data/documents/` for persistence.
-
-### 2. Chunking (`app/ingestion/chunker.py`)
-
-- **LangChain `RecursiveCharacterTextSplitter`** splits page text into overlapping chunks (`chunk_size=500`, `chunk_overlap=50`).
-- Each chunk carries full provenance metadata:
-  - `doc_id` — SHA256 hash linking back to the parent document
-  - `filename` — original PDF filename
-  - `page_number` — 1-indexed page where the chunk originated
-  - `chunk_id` — deterministic ID: `{doc_id}_p{page}_c{index}`
-  - `chunk_index` — sequential position within the document
-
-### 3. Embeddings (`app/core/embeddings.py`)
-
-- **Sentence Transformers `all-MiniLM-L6-v2`** generates 384-dimensional dense vectors.
-- Runs entirely locally on CPU — zero API cost.
-- The model is loaded once (singleton) and reused across requests.
-- Same model is used for both document chunk embeddings and query embeddings.
-
-### 4. Vector Storage (`app/core/vector_store.py`)
-
-- **Qdrant** stores vectors with cosine distance metric and 384-dim configuration.
-- Each point includes a rich **payload**: text, doc_id, filename, page_number, chunk_id, chunk_index.
-- Points use **deterministic UUID5** IDs derived from chunk_id — re-indexing the same document updates rather than duplicates.
-- Docker volume `./data/qdrant_storage:/qdrant/storage` ensures persistence across container restarts.
-
-### 5. Retrieval (`app/retrieval/retriever.py`)
-
-- User query is embedded using the same `all-MiniLM-L6-v2` model.
-- **Cosine similarity search** returns the top-K most relevant chunks.
-- Supports optional **doc_id filtering** to scope search to specific documents.
-- Returns `RetrievedChunk` objects with scores and full metadata.
-
-### 6. LangGraph Workflow (`app/workflows/rag_graph.py`)
-
-A 4-node LangGraph `StateGraph` orchestrates the RAG pipeline:
-
-| Node | Function |
-|---|---|
-| **Analyze Query** | Optimizes user question into search-friendly keywords using Gemini |
-| **Retrieve** | Executes Qdrant cosine similarity search with the optimized query |
-| **Generate** | Sends retrieved context + question to Gemini with strictly grounded system prompt |
-| **Validate Grounding** | Verifies the answer is supported by context; enforces refusal if not; attaches real citations |
-
-### 7. Grounding & Citations
-
-- **System prompt** explicitly forbids using outside knowledge.
-- If context is insufficient, the system returns the exact refusal message.
-- **Citations are extracted directly from retrieved chunks** — never generated or guessed.
-- Each citation includes: filename, page_number, chunk_id, supporting text snippet, similarity score.
-
-### 8. Advanced Features
-
-All advanced features (comparison, contradiction detection, summarization) use the **same retrieval pipeline**:
-
-- **Document Comparison**: Retrieves top-K chunks from Doc A and Doc B separately, then prompts Gemini for a structured diff analysis with dual-source citations.
-- **Contradiction Detection**: Retrieves chunks across documents, prompts Gemini to identify genuine semantic conflicts (ignoring differences due to different dates, versions, or conditions).
-- **Targeted Summarization**: Retrieves topic-relevant chunks, then generates a focused summary with citations.
+| `POST` | `/documents/upload` | Upload a PDF file, extract page text, chunk, embed, and index into Qdrant |
+| `GET` | `/documents` | List all indexed documents with page and chunk counts |
+| `DELETE` | `/documents/{document_id}` | Delete a document and its indexed vector points from Qdrant |
+| `POST` | `/query` | Execute the LangGraph grounded Q&A workflow with source citations |
+| `POST` | `/compare` | Perform targeted semantic comparison between two indexed documents on a topic |
+| `POST` | `/contradictions` | Scan cross-document context to identify factual contradictions on a topic |
+| `POST` | `/summarize` | Generate a targeted summary of document sections relevant to a topic |
+| `GET` | `/evaluation` | Run the automated RAG benchmark evaluation suite against ground truth |
+| `GET` | `/health` | Health check endpoint returning status of FastAPI, Qdrant, and embedding model |
 
 ---
 
 ## Testing
 
-### Run All Tests
+The project includes an automated test suite covering unit functionality, vector store integration, retrieval filtering, and API endpoints.
+
+To run the complete test suite:
 
 ```bash
-python -m pytest tests/ -v
+pytest
 ```
 
-**39 tests** covering:
-
-| Test File | Coverage |
-|---|---|
-| `test_ingestion.py` | PDF loading, SHA256 hashing, error handling |
-| `test_chunking.py` | Text splitting, metadata preservation, edge cases |
-| `test_embeddings.py` | Embedding dimensions, batch processing, semantic similarity |
-| `test_vector_store.py` | Qdrant CRUD, deterministic UUIDs, deduplication |
-| `test_retrieval.py` | Semantic search, top-K, doc filtering, error handling |
-| `test_rag_workflow.py` | LangGraph pipeline, grounding, citations |
-| `test_comparison.py` | Compare, contradict, summarize |
-| `test_evaluation.py` | Benchmark dataset loading, metrics structure |
-| `test_api.py` | FastAPI endpoint integration |
-
-### Run Evaluation Benchmark
-
-```bash
-python -m app.evaluation.evaluator
-```
-
-This measures:
-- **Retrieval Recall@K** — Did the correct page appear in retrieved chunks?
-- **Grounding Score** — Does the answer contain expected keywords from the ground truth?
-- **Citation Accuracy** — Does the citation point to the correct page?
-- **Refusal Accuracy** — Does the system refuse out-of-scope questions?
+The test suite contains **39 tests** covering:
+- **API routes** (`tests/test_api.py`): Document upload, listing, deletion, and query routing.
+- **Ingestion & parsing** (`tests/test_ingestion.py`): PDF loading, page extraction, and edge cases (empty or invalid PDFs).
+- **Chunking logic** (`tests/test_chunking.py`): Chunk size, overlap bounds, and metadata provenance tagging.
+- **Embedding service** (`tests/test_embeddings.py`): Dimension validation, batch encoding, and normalization.
+- **Vector store operations** (`tests/test_vector_store.py`): Point insertion, deduplication, and payload filtering.
+- **Retriever functionality** (`tests/test_retrieval.py`): Cosine ranking, score thresholds, and single/multi-document scoping.
+- **LangGraph workflow** (`tests/test_rag_workflow.py`): Node transitions, state updates, and refusal triggers.
+- **Comparison & Contradictions** (`tests/test_comparison.py`): Dual-document retrieval and conflict extraction.
+- **Benchmark evaluation** (`tests/test_evaluation.py`): Metric computations across test dataset samples.
 
 ---
 
 ## Design Decisions
 
-### Why PyMuPDF instead of PDFPlumber or LangChain loaders?
-
-PyMuPDF is significantly faster and provides clean page-by-page text extraction with reliable page number tracking. LangChain's PDF loaders are wrappers that add unnecessary abstraction for our use case.
-
-### Why `all-MiniLM-L6-v2` instead of OpenAI embeddings?
-
-- **Free**: Runs locally on CPU with zero API cost.
-- **Fast**: ~80ms per query embedding.
-- **Good enough**: 384 dimensions provide strong semantic similarity for document Q&A.
-- **Consistent**: Same model for document and query embeddings ensures proper vector space alignment.
-
-### Why Qdrant instead of ChromaDB or FAISS?
-
-- **Production-ready**: Qdrant offers payload filtering, persistence, and a REST API out of the box.
-- **Docker-native**: Simple `docker compose up` with volume persistence.
-- **Payload filtering**: Supports `doc_id` filtering for scoped multi-document queries.
-- **Interview-relevant**: Demonstrates real vector database usage, not an in-memory prototype.
-
-### Why LangGraph instead of a simple function chain?
-
-LangGraph makes the RAG pipeline **inspectable and extensible**:
-- Each step (query analysis → retrieval → generation → validation) is a named node.
-- State is explicitly typed with `TypedDict`.
-- Adding new steps (e.g., reranking, caching) requires adding a node, not refactoring the entire pipeline.
-- Demonstrates understanding of **stateful agentic workflows** — a key concept in modern GenAI systems.
-
-### Why strict grounding instead of allowing LLM general knowledge?
-
-For a RAG system, the **entire value proposition** is that answers come from your documents. If the LLM fills gaps with general knowledge, you can't trust any answer, and citations become meaningless. Strict grounding with explicit refusal is the correct design.
+- **Why Qdrant**: Qdrant provides fast vector search, native support for cosine distance, and payload-based filtering. This allows filtering chunks by `doc_id` or multiple document scopes without creating separate vector collections per document.
+- **Why Sentence Transformers (`all-MiniLM-L6-v2`)**: Running embeddings locally removes external API rate limits, lowers latency during batch chunking, eliminates cost per embedding call, and outputs compact 384-dimensional vectors.
+- **Why LangGraph**: Rather than relying on rigid linear chains, LangGraph uses an explicit state machine. Each stage (query analysis, retrieval, generation, validation) is an observable node with explicit inputs, outputs, and conditional checks.
+- **Why FastAPI + Streamlit**: FastAPI manages typed, asynchronous endpoints and heavy backend processing, while Streamlit delivers a lightweight, reactive UI for document exploration and evaluation benchmarking.
+- **Why Page-Level Metadata Citations**: Storing `page_number` and `chunk_id` alongside text chunks in Qdrant ensures citations are generated from real retrieved payload metadata rather than LLM-generated references.
 
 ---
 
-## Interview Q&A
+## Future Improvements
 
-### Q: What is RAG and why did you use it?
-
-**A:** RAG (Retrieval-Augmented Generation) combines information retrieval with text generation. Instead of relying solely on the LLM's training data, we retrieve relevant document chunks and provide them as context. This ensures answers are grounded in actual uploaded documents, reduces hallucination, and enables the system to work with documents the LLM has never seen.
-
-### Q: Walk me through what happens when a user asks a question.
-
-**A:**
-1. The user's question enters the LangGraph workflow.
-2. **Query Analysis**: Gemini extracts optimized search keywords from the question.
-3. **Embedding**: The optimized query is embedded into a 384-dimensional vector using the same Sentence Transformer model used for document chunks.
-4. **Retrieval**: Qdrant performs cosine similarity search, returning the top-K most relevant chunks with their metadata.
-5. **Generation**: The retrieved chunks are formatted into a prompt with a strict grounding system instruction, sent to Gemini.
-6. **Validation**: The generated answer is checked against the retrieved context. If grounded, real citations (filename + page number extracted from chunk metadata) are attached. If not, the system returns a refusal message.
-
-### Q: How do you prevent hallucination?
-
-**A:** Three layers:
-1. **System prompt**: Explicitly forbids using outside knowledge and requires the exact refusal message when context is insufficient.
-2. **Grounding validation**: A separate LLM call verifies every claim in the answer is supported by the retrieved context.
-3. **Real citations**: Citations come directly from chunk metadata (filename, page_number), never from the LLM's generation. If the LLM fabricates a citation, it won't match any retrieved chunk.
-
-### Q: How do you generate document IDs?
-
-**A:** SHA256 hash of the raw PDF file bytes. This is deterministic — uploading the same file twice produces the same doc_id, which prevents duplicate indexing (Qdrant point IDs are UUID5 derived from chunk_id, so re-indexing updates existing points instead of creating duplicates).
-
-### Q: Why did you choose cosine similarity over other distance metrics?
-
-**A:** Cosine similarity measures the angle between vectors, making it invariant to vector magnitude. This is ideal for dense embeddings from Sentence Transformers, where semantic meaning is encoded in direction rather than magnitude. Euclidean distance would be sensitive to embedding norms, which aren't semantically meaningful here.
-
-### Q: How does your document comparison work?
-
-**A:** It's fully RAG-driven:
-1. Retrieve top-K chunks from Document A filtered by `doc_id_a`.
-2. Retrieve top-K chunks from Document B filtered by `doc_id_b`.
-3. Format both sets of chunks as side-by-side context.
-4. Prompt Gemini to identify concrete differences with exact page citations from both documents.
-
-This approach works because the retrieval scoping ensures we compare corresponding sections rather than random chunks.
-
-### Q: How does contradiction detection distinguish real contradictions from version differences?
-
-**A:** The prompt explicitly instructs Gemini: "Statements that apply to different years, different versions, different product tiers, or conditional clauses are NOT contradictions unless they claim to describe the same condition simultaneously." The system retrieves cross-document chunks on a topic, then applies this nuanced analysis. For example, "15 days leave in 2025" and "24 days leave in 2026" is a policy change, not a contradiction.
-
-### Q: What would you improve with more time?
-
-**A:**
-1. **Hybrid search**: Combine dense vector search with BM25 sparse retrieval for better recall on keyword-heavy queries.
-2. **Reranking**: Add a cross-encoder reranker (e.g., `cross-encoder/ms-marco-MiniLM-L-6-v2`) between retrieval and generation to improve precision.
-3. **Streaming responses**: Use Gemini's streaming API for real-time answer generation in the UI.
-4. **Multi-modal support**: Extend PyMuPDF to extract tables and images from PDFs.
-5. **Conversation memory**: Add session-based chat history for follow-up questions.
+- **Hybrid Search**: Combine dense vector retrieval with BM25 sparse lexical search to improve keyword precision for acronyms and specific identifiers.
+- **Cross-Encoder Reranking**: Add a secondary reranking step (e.g., using `cross-encoder/ms-marco-MiniLM-L-6-v2`) over initial retrieval results before passing context to the LLM.
+- **Streaming Responses**: Implement Server-Sent Events (SSE) in FastAPI and token streaming in Streamlit to reduce perceived response latency.
+- **Multimodal Document Parsing**: Incorporate table extraction and OCR processing for scanned PDFs and embedded document images.
+- **Conversational Memory**: Introduce session-based conversation history into the LangGraph state to support multi-turn contextual follow-ups.
 
 ---
 
 ## License
 
-This project is for educational and portfolio purposes.
+This project is licensed for educational and portfolio purposes.
