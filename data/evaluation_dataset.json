@@ -1,0 +1,74 @@
+[
+  {
+    "id": "tc_001",
+    "question": "How many days of paid annual leave do employees receive per year?",
+    "expected_answer_keywords": ["24 days", "annual leave"],
+    "expected_filename": "RAG_Test_Document_Realistic.pdf",
+    "expected_page": 2,
+    "should_refuse": false
+  },
+  {
+    "id": "tc_002",
+    "question": "How many days of sick leave are granted per calendar year?",
+    "expected_answer_keywords": ["12 days", "sick leave"],
+    "expected_filename": "RAG_Test_Document_Realistic.pdf",
+    "expected_page": 2,
+    "should_refuse": false
+  },
+  {
+    "id": "tc_003",
+    "question": "How many days per week are employees permitted to work remotely?",
+    "expected_answer_keywords": ["3", "days", "remotely"],
+    "expected_filename": "RAG_Test_Document_Realistic.pdf",
+    "expected_page": 3,
+    "should_refuse": false
+  },
+  {
+    "id": "tc_004",
+    "question": "Which days of the week are designated collaboration days in the office?",
+    "expected_answer_keywords": ["Tuesday", "Thursday", "collaboration"],
+    "expected_filename": "RAG_Test_Document_Realistic.pdf",
+    "expected_page": 3,
+    "should_refuse": false
+  },
+  {
+    "id": "tc_005",
+    "question": "How many engineer reviews are required before a production deployment?",
+    "expected_answer_keywords": ["two engineers", "review", "deployment"],
+    "expected_filename": "RAG_Test_Document_Realistic.pdf",
+    "expected_page": 4,
+    "should_refuse": false
+  },
+  {
+    "id": "tc_006",
+    "question": "What is the primary application database used by the engineering team?",
+    "expected_answer_keywords": ["PostgreSQL"],
+    "expected_filename": "RAG_Test_Document_Realistic.pdf",
+    "expected_page": 4,
+    "should_refuse": false
+  },
+  {
+    "id": "tc_007",
+    "question": "What is the maximum number of unused annual leave days that can be carried forward?",
+    "expected_answer_keywords": ["10", "carried"],
+    "expected_filename": "RAG_Test_Document_Realistic.pdf",
+    "expected_page": 2,
+    "should_refuse": false
+  },
+  {
+    "id": "tc_008",
+    "question": "What is the company's Mars rover launch schedule?",
+    "expected_answer_keywords": ["couldn't find this information in the uploaded documents"],
+    "expected_filename": null,
+    "expected_page": null,
+    "should_refuse": true
+  },
+  {
+    "id": "tc_009",
+    "question": "What discount code is available for quantum computing hardware?",
+    "expected_answer_keywords": ["couldn't find this information in the uploaded documents"],
+    "expected_filename": null,
+    "expected_page": null,
+    "should_refuse": true
+  }
+]
