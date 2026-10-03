@@ -290,8 +290,4 @@ The test suite contains **39 tests** covering:
 - **Multimodal Document Parsing**: Incorporate table extraction and OCR processing for scanned PDFs and embedded document images.
 - **Conversational Memory**: Introduce session-based conversation history into the LangGraph state to support multi-turn contextual follow-ups.
 
----
 
-## License
-
-This project is licensed for educational and portfolio purposes.
